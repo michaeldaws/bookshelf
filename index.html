@@ -115,6 +115,32 @@ main{flex:1;padding:6px 18px 120px}
 .chip{flex:none;padding:7px 14px;border-radius:22px;border:1px solid var(--line);background:var(--card);font-size:14px;color:var(--ink-soft);white-space:nowrap}
 .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 
+/* Reading goal */
+.goal-card{display:flex;align-items:center;gap:16px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow);margin:6px 0 4px}
+.goal-card.empty-goal{cursor:pointer}
+.goal-card.empty-goal:active{transform:scale(.99)}
+.ring{flex:none}
+.ring-bg{fill:none;stroke:var(--paper-2);stroke-width:7}
+.ring-fg{fill:none;stroke:var(--ox);stroke-width:7;stroke-linecap:round;transition:stroke-dashoffset .6s ease}
+.ring-n{fill:var(--ink);font-family:"Fraunces",serif;font-weight:900;font-size:24px;text-anchor:middle}
+.ring-d{fill:var(--ink-soft);font-family:"Spline Sans Mono",monospace;font-size:10px;text-anchor:middle}
+.goal-meta{flex:1;min-width:0}
+.goal-yr{font-family:"Fraunces",serif;font-weight:600;font-size:18px}
+.goal-sub{color:var(--ink-soft);font-size:14px;font-style:italic;margin-top:3px}
+.link{margin-top:8px;font-family:"Spline Sans Mono",monospace;font-size:11px;color:var(--ox);text-transform:uppercase;letter-spacing:.05em}
+.goal-edit{flex:1}
+.goal-edit label{display:block;font-family:"Spline Sans Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:8px}
+
+/* Author view */
+.shelf-seg{margin:2px 0 16px}
+.au-group{margin-bottom:20px}
+.au-head{display:flex;align-items:baseline;gap:10px;padding:0 4px 9px;border-bottom:1px solid var(--line);margin-bottom:11px}
+.au-name{font-family:"Fraunces",serif;font-weight:600;font-size:19px}
+.au-series{font-family:"Spline Sans Mono",monospace;font-size:11px;color:var(--gold);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-pill{font-family:"Spline Sans Mono",monospace;font-size:10px;letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--ink-soft)}
+.st-read{color:var(--green);border-color:color-mix(in srgb,var(--green) 50%,var(--line))}
+.st-reading{color:var(--ox);border-color:color-mix(in srgb,var(--ox) 50%,var(--line))}
+
 /* Empty */
 .empty{text-align:center;padding:54px 24px;color:var(--ink-soft)}
 .empty .ic{font-size:40px;opacity:.5}
@@ -214,6 +240,8 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
 .spinner{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--ox);border-radius:50%;display:inline-block;animation:spin .7s linear infinite;vertical-align:-3px;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .muted{color:var(--ink-soft);font-style:italic;font-size:14px}
+.backup-status{font-family:"Spline Sans Mono",monospace;font-size:12px;letter-spacing:.03em;color:var(--ink-soft);margin:0 0 14px}
+.backup-status.stale{color:var(--ox)}
 .del{color:var(--ox);text-align:center;width:100%;padding:14px;font-size:14px;margin-top:4px}
 </style>
 </head>
@@ -272,6 +300,7 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
   <div class="sheet-head"><h2>Settings</h2><button class="x" data-close>Close</button></div>
   <div class="sheet-body">
     <p class="muted" style="margin-top:0">Your library lives only on this device. Back it up now and then.</p>
+    <p id="backupStatus" class="backup-status"></p>
     <button class="btn" id="exportBtn">Export library (.json)</button>
     <label class="btn ghost" style="margin-top:10px">Import from backup
       <input type="file" id="importFile" accept="application/json" hidden>
@@ -293,16 +322,18 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
 <script>
 "use strict";
 /* ---------- IndexedDB ---------- */
-const DB_NAME="margins_db", STORE="books";
-function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);
-  r.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"id"});};
+const DB_NAME="margins_db", STORE="books", META="meta";
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,2);
+  r.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"id"});if(!db.objectStoreNames.contains(META))db.createObjectStore(META,{keyPath:"key"});};
   r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error);});}
 async function dbAll(){const db=await openDB();return new Promise((res,rej)=>{const q=db.transaction(STORE).objectStore(STORE).getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});}
 async function dbPut(b){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(b);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 async function dbDel(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).delete(id);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+async function metaGet(key){const db=await openDB();return new Promise((res,rej)=>{const q=db.transaction(META).objectStore(META).get(key);q.onsuccess=()=>res(q.result?q.result.value:null);q.onerror=()=>rej(q.error);});}
+async function metaSet(key,value){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(META,"readwrite");tx.objectStore(META).put({key,value});tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 /* ---------- State / helpers ---------- */
-let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; // months / specific year
+let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null;
 const $=s=>document.querySelector(s); const main=$("#main");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const todayISO=()=>new Date().toISOString().slice(0,10);
@@ -361,9 +392,16 @@ function renderWant(){
 
 function renderShelf(){
   const read=books.filter(b=>b.status==="read").sort((a,b)=>(b.dateFinished||"").localeCompare(a.dateFinished||""));
-  let h=`<div class="view"><div class="section-title"><h2>The bookshelf</h2><span class="count">${read.length} read</span></div>`;
-  if(!read.length){h+=`<div class="empty"><div class="ic">📚</div><p>No finished books yet.<br>Your shelf will fill up here.</p></div>`;}
-  else{
+  let h=`<div class="view"><div class="section-title"><h2>The bookshelf</h2><span class="count">${read.length} read</span></div>
+    <div class="status-seg shelf-seg">
+      <button data-mode="covers" class="${shelfMode==="covers"?"on":""}">Covers</button>
+      <button data-mode="authors" class="${shelfMode==="authors"?"on":""}">By author</button>
+    </div>`;
+  if(shelfMode==="authors"){
+    h+=renderAuthors();
+  }else if(!read.length){
+    h+=`<div class="empty"><div class="ic">📚</div><p>No finished books yet.<br>Your shelf will fill up here.</p></div>`;
+  }else{
     h+=`<div class="shelf-wrap"><div class="shelf">`;
     read.forEach(b=>{h+=`<div class="book" data-id="${b.id}">${coverHTML(b)}
       <div class="bt">${esc(b.title)}</div>
@@ -371,7 +409,30 @@ function renderShelf(){
     h+=`</div><div class="board"></div></div>`;
   }
   h+=`</div>`; main.innerHTML=h;
-  main.querySelectorAll(".book").forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
+  main.querySelectorAll(".shelf-seg button").forEach(b=>b.onclick=()=>{shelfMode=b.dataset.mode;renderShelf();});
+  main.querySelectorAll(".book,.r-card").forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
+}
+
+function renderAuthors(){
+  if(!books.length)return `<div class="empty"><div class="ic">✍️</div><p>No books in your library yet.</p></div>`;
+  const groups={};
+  books.forEach(b=>{const a=((b.author||"").trim())||"Unknown";(groups[a]=groups[a]||[]).push(b);});
+  const names=Object.keys(groups).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}));
+  const stName={read:"Read",reading:"Reading",want:"Want"};
+  let h=`<div class="authors">`;
+  names.forEach(name=>{
+    const list=groups[name].sort((a,b)=>((a.series||"").localeCompare(b.series||""))||(a.title||"").localeCompare(b.title||""));
+    h+=`<div class="au-group"><div class="au-head"><span class="au-name">${esc(name)}</span><span class="count">${list.length}</span></div>`;
+    list.forEach(b=>{
+      h+=`<div class="r-card" data-id="${b.id}">${coverHTML(b)}
+        <div class="r-meta"><div class="r-title">${esc(b.title)}</div>
+          ${b.series?`<div class="au-series">${esc(b.series)}</div>`:`<div class="r-author">${b.status==="read"&&b.dateFinished?new Date(b.dateFinished+"T00:00:00").getFullYear():""}</div>`}
+          <div class="prog-row" style="margin-top:auto;padding-top:9px"><span class="st-pill st-${b.status}">${stName[b.status]||""}</span><span>${b.rating?"★".repeat(b.rating):""}</span></div>
+        </div></div>`;
+    });
+    h+=`</div>`;
+  });
+  return h+`</div>`;
 }
 
 function renderStats(){
@@ -392,7 +453,9 @@ function renderStats(){
   inRange=inRange.sort((a,b)=>(b.dateFinished||"").localeCompare(a.dateFinished||""));
   const pages=inRange.reduce((s,b)=>s+(+b.totalPages||0),0);
   const thisYear=read.filter(b=>b.dateFinished&&yr(b.dateFinished)===new Date().getFullYear()).length;
+  const cy=new Date().getFullYear();
   let h=`<div class="view">
+    ${goalCard(cy,thisYear,goals[cy]||0)}
     <div class="stat-grid">
       <div class="stat"><div class="n">${read.length}</div><div class="l">Books read</div></div>
       <div class="stat"><div class="n">${thisYear}</div><div class="l">This year</div></div>
@@ -422,6 +485,40 @@ function renderStats(){
   main.querySelectorAll(".chip[data-m]").forEach(c=>c.onclick=()=>{recentRange=+c.dataset.m;yearFilter=null;renderStats();});
   main.querySelectorAll(".chip[data-y]").forEach(c=>c.onclick=()=>{const y=+c.dataset.y;yearFilter=(yearFilter===y?null:y);renderStats();});
   main.querySelectorAll(".r-card").forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
+  if(editingGoal){
+    $("#goalInput")?.focus();
+    $("#goalSave").onclick=async()=>{const v=Math.max(0,parseInt($("#goalInput").value)||0);goals[cy]=v;await metaSet("goals",goals);editingGoal=false;renderStats();toast(v?"Goal set: "+v+" books in "+cy:"Goal cleared");};
+    $("#goalCancel").onclick=()=>{editingGoal=false;renderStats();};
+  }else{
+    $("#goalEdit")&&($("#goalEdit").onclick=()=>{editingGoal=true;renderStats();});
+    $("#goalSet")&&($("#goalSet").onclick=()=>{editingGoal=true;renderStats();});
+  }
+}
+
+function goalCard(cy,done,target){
+  if(editingGoal){
+    return `<div class="goal-card"><div class="goal-edit">
+      <label>Books to read in ${cy}</label>
+      <div class="isbn-row"><input id="goalInput" inputmode="numeric" value="${target||""}" placeholder="e.g. 24"><button class="btn sm" id="goalSave">Save</button></div>
+      <button class="link" id="goalCancel">Cancel</button></div></div>`;
+  }
+  if(target>0){
+    const r=34,C=2*Math.PI*r,frac=Math.min(1,done/target),off=C*(1-frac),left=Math.max(0,target-done),pctv=Math.round(frac*100);
+    return `<div class="goal-card">
+      <svg class="ring" viewBox="0 0 84 84" width="84" height="84">
+        <circle cx="42" cy="42" r="${r}" class="ring-bg"/>
+        <circle cx="42" cy="42" r="${r}" class="ring-fg" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 42 42)"/>
+        <text x="42" y="40" class="ring-n">${done}</text><text x="42" y="55" class="ring-d">of ${target}</text>
+      </svg>
+      <div class="goal-meta">
+        <div class="goal-yr">${cy} reading goal</div>
+        <div class="goal-sub">${done>=target?"Goal reached — bravo! 🎉":left+" book"+(left===1?"":"s")+" to go · "+pctv+"%"}</div>
+        <button class="link" id="goalEdit">Edit goal</button>
+      </div></div>`;
+  }
+  return `<div class="goal-card empty-goal" id="goalSet">
+    <div class="oi" style="width:46px;height:46px;flex:none;border-radius:13px;display:grid;place-items:center;background:var(--paper-2);font-size:22px">🎯</div>
+    <div class="goal-meta"><div class="goal-yr">Set a ${cy} reading goal</div><div class="goal-sub">Track how many books you want to finish this year</div></div></div>`;
 }
 
 /* ---------- Sheets ---------- */
@@ -459,7 +556,8 @@ function isbnForm(){
     const data=await lookupISBN(isbn);
     if(data)bookForm(data);
     else{
-      $("#isbnMsg").innerHTML=`No match found online. <button class="btn sm" id="isbnManual" style="margin-top:8px">Add it manually</button>`;
+      const why=lookupDiag?` <span class="muted" style="display:block;margin-top:6px;font-size:12.5px">${esc(lookupDiag)}</span>`:"";
+      $("#isbnMsg").innerHTML=`No match found online.${why}<button class="btn sm" id="isbnManual" style="margin-top:10px">Add it manually</button>`;
       $("#isbnManual").onclick=()=>bookForm({isbn});
     }
   };
@@ -473,6 +571,7 @@ function bookForm(pre){
       <div class="meta"><div class="muted">${pre.isbn?"ISBN "+esc(pre.isbn):"New book"}</div></div></div>
     <div class="field"><label>Title</label><input id="fTitle" value="${esc(pre.title||"")}" placeholder="Book title"></div>
     <div class="field"><label>Author</label><input id="fAuthor" value="${esc(pre.author||"")}" placeholder="Author"></div>
+    <div class="field"><label>Series (optional)</label><input id="fSeries" value="${esc(pre.series||"")}" placeholder="e.g. The Lord of the Rings"></div>
     <div class="field"><label>Total pages</label><input id="fPages" inputmode="numeric" value="${pre.totalPages||""}" placeholder="e.g. 320"></div>
     <div class="field"><label>Status</label>
       <div class="status-seg" id="segStatus">
@@ -503,7 +602,7 @@ function bookForm(pre){
     if(!title){toast("Please enter a title");return;}
     const tp=parseInt($("#fPages").value)||0;
     const b={
-      id:pre.id||uid(), isbn:pre.isbn||"", title, author:$("#fAuthor").value.trim(),
+      id:pre.id||uid(), isbn:pre.isbn||"", title, author:$("#fAuthor").value.trim(), series:$("#fSeries").value.trim(),
       cover:$("#fCover").value||null, totalPages:tp, currentPage:pre.currentPage||(status==="read"?tp:0),
       status, rating:pre.rating||0, notes:pre.notes||"", dateAdded:pre.dateAdded||todayISO(),
       dateStarted:status!=="want"?($("#fStart")?.value||todayISO()):"",
@@ -538,6 +637,7 @@ function openDetail(id){
       <div class="field"><label>Started</label><input type="date" id="dStart" value="${b.dateStarted||""}"></div>
       <div class="field"><label>Finished</label><input type="date" id="dFin" value="${b.dateFinished||""}"></div>
     </div>
+    <div class="field"><label>Series (optional)</label><input id="dSeries" value="${esc(b.series||"")}" placeholder="e.g. The Lord of the Rings"></div>
     <div class="field"><label>Notes</label><textarea id="dNotes" placeholder="Quotes, thoughts…">${esc(b.notes||"")}</textarea></div>
     <button class="btn ox" id="dMarkDone">Mark as finished</button>
     <button class="btn" id="dSave">Save changes</button>
@@ -578,7 +678,7 @@ function openDetail(id){
   segs.forEach(sb=>sb.onclick=()=>{segs.forEach(x=>x.classList.remove("on"));sb.classList.add("on");status=sb.dataset.s;drawProg();});
 
   const commit=async(extra={})=>{
-    Object.assign(b,{status,rating,currentPage:cur,cover,notes:$("#dNotes").value,
+    Object.assign(b,{status,rating,currentPage:cur,cover,series:$("#dSeries").value.trim(),notes:$("#dNotes").value,
       dateStarted:$("#dStart").value,dateFinished:$("#dFin").value},extra);
     await dbPut(b); books=await dbAll(); closeSheets(); render();
   };
@@ -601,15 +701,17 @@ const complete=r=>r&&r.title&&r.author&&r.totalPages&&r.cover;
 
 async function srcGoogle(isbn){
   try{
-    const r=await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:"+isbn);
-    const d=await r.json();
-    if(d.totalItems>0){
+    const r=await fetch("https://www.googleapis.com/books/v1/volumes?country=US&q=isbn:"+isbn);
+    let d; try{d=await r.json();}catch(_){d={};}
+    if(d.error){lookupDiag="Google Books error: "+(d.error.message||r.status);return null;}
+    if(!r.ok){lookupDiag="Google Books returned "+r.status;return null;}
+    if(d.totalItems>0&&d.items){
       const v=d.items[0].volumeInfo;
       let cover=v.imageLinks?(v.imageLinks.extraLarge||v.imageLinks.large||v.imageLinks.medium||v.imageLinks.thumbnail||v.imageLinks.smallThumbnail):null;
       if(cover)cover=cover.replace("http://","https://").replace(/&edge=curl/,"").replace(/zoom=\d/,"zoom=1");
       return {title:v.title||"",author:(v.authors||[]).join(", "),totalPages:v.pageCount||0,cover};
     }
-  }catch(e){}
+  }catch(e){lookupDiag="Couldn't reach Google Books (network or CORS). "+(e.message||"");}
   return null;
 }
 async function srcOpenLib(isbn){
@@ -617,19 +719,34 @@ async function srcOpenLib(isbn){
     const r=await fetch("https://openlibrary.org/api/books?bibkeys=ISBN:"+isbn+"&format=json&jscmd=data");
     const d=await r.json(); const v=d["ISBN:"+isbn];
     if(v)return {title:v.title||"",author:(v.authors||[]).map(a=>a.name).join(", "),totalPages:v.number_of_pages||0,cover:v.cover?(v.cover.large||v.cover.medium||v.cover.small):null};
+  }catch(e){if(!lookupDiag)lookupDiag="Couldn't reach Open Library. "+(e.message||"");}
+  return null;
+}
+async function srcOpenLibSearch(isbn){
+  try{
+    const r=await fetch("https://openlibrary.org/search.json?isbn="+isbn+"&fields=title,author_name,number_of_pages_median,cover_i&limit=1");
+    const d=await r.json();
+    if(d.docs&&d.docs[0]){const v=d.docs[0];
+      return {title:v.title||"",author:(v.author_name||[]).join(", "),totalPages:v.number_of_pages_median||0,
+        cover:v.cover_i?"https://covers.openlibrary.org/b/id/"+v.cover_i+"-L.jpg":null};}
   }catch(e){}
   return null;
 }
 
+let lookupDiag="";
 async function lookupISBN(raw){
+  lookupDiag="";
   const variants=isbnVariants(raw);
-  if(!variants[0]||variants[0].length<10)return null;
+  if(!variants[0]||variants[0].length<10){lookupDiag="That ISBN isn't 10 or 13 digits.";return null;}
   let best=null;
   // pass 1: Google for every variant
   for(const isbn of variants){const g=await srcGoogle(isbn);if(g)best=merge(best,g);if(complete(best))break;}
-  // pass 2: Open Library to fill any gaps
+  // pass 2: Open Library editions API
   if(!complete(best))for(const isbn of variants){const o=await srcOpenLib(isbn);if(o)best=merge(best,o);if(complete(best))break;}
+  // pass 3: Open Library search index
+  if(!best||!best.title)for(const isbn of variants){const s=await srcOpenLibSearch(isbn);if(s)best=merge(best,s);if(best&&best.title)break;}
   if(!best||!best.title)return null;
+  lookupDiag="";
   // cover fallback: Open Library covers-by-ISBN (default=false → 404 when missing)
   if(!best.cover){for(const isbn of variants){const u="https://covers.openlibrary.org/b/isbn/"+isbn+"-L.jpg?default=false";const b64=await toBase64(u);if(b64&&b64.startsWith("data:")){best.cover=b64;break;}}}
   else if(/^https?:/.test(best.cover)){best.cover=await toBase64(best.cover);}
@@ -678,20 +795,33 @@ async function onScanned(isbn){
 
 /* ---------- Backup ---------- */
 function exportData(){
-  const blob=new Blob([JSON.stringify(books,null,2)],{type:"application/json"});
+  const payload={version:2,books,goals};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
-  a.download="margins-library-"+todayISO()+".json";a.click();toast("Backup downloaded");
+  a.download="margins-library-"+todayISO()+".json";a.click();
+  lastBackup=new Date().toISOString(); metaSet("lastBackup",lastBackup); updateBackupStatus();
+  toast("Backup downloaded");
+}
+function updateBackupStatus(){
+  const el=$("#backupStatus"); if(!el)return;
+  if(!lastBackup){el.textContent=books.length?"No backup made yet":"No books to back up yet";el.classList.toggle("stale",books.length>0);return;}
+  const days=Math.floor((Date.now()-new Date(lastBackup).getTime())/86400000);
+  el.textContent=days<=0?"Last backed up today":days===1?"Last backed up yesterday":"Last backed up "+days+" days ago";
+  el.classList.toggle("stale",days>=14);
 }
 async function importData(file){
-  try{const txt=await file.text();const arr=JSON.parse(txt);if(!Array.isArray(arr))throw 0;
+  try{const data=JSON.parse(await file.text());
+    const arr=Array.isArray(data)?data:(data.books||[]);
+    if(!Array.isArray(arr))throw 0;
     for(const b of arr){if(b&&b.id&&b.title)await dbPut(b);}
+    if(data&&data.goals&&typeof data.goals==="object"){goals={...goals,...data.goals};await metaSet("goals",goals);}
     books=await dbAll();render();closeSheets();toast("Imported "+arr.length+" books");
   }catch(e){toast("Couldn't read that file");}
 }
 
 /* ---------- Wire up ---------- */
 $("#addBtn").onclick=openAdd;
-$("#settingsBtn").onclick=()=>showSheet("#setSheet");
+$("#settingsBtn").onclick=()=>{showSheet("#setSheet");updateBackupStatus();};
 $("#closeScan").onclick=stopScan;
 $("#scrim").onclick=closeSheets;
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeSheets);
@@ -699,7 +829,7 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.view;
 $("#exportBtn").onclick=exportData;
 $("#importFile").onchange=e=>{if(e.target.files[0])importData(e.target.files[0]);};
 
-(async function init(){ books=await dbAll(); render(); })();
+(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); render(); })();
 </script>
 </body>
 </html>
