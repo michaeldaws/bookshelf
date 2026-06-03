@@ -637,6 +637,7 @@ function openDetail(id){
         <button data-s="reading" class="${b.status==="reading"?"on":""}">Reading</button>
         <button data-s="read" class="${b.status==="read"?"on":""}">Read</button>
       </div></div>
+    <div class="field"><label>Total pages</label><input id="dPages" inputmode="numeric" value="${b.totalPages||""}" placeholder="e.g. 320"></div>
     <div id="dProg"></div>
     <div class="two">
       <div class="field"><label>Started</label><input type="date" id="dStart" value="${b.dateStarted||""}"></div>
@@ -680,11 +681,12 @@ function openDetail(id){
       if(btn.dataset.set!=null)upd(+btn.dataset.set); else upd(cur+ +btn.dataset.d);});
   };
   drawProg();
+  $("#dPages").oninput=()=>{const v=parseInt($("#dPages").value)||0;b.totalPages=v;if(cur>v)cur=v;drawProg();};
   const segs=body.querySelectorAll("#dSeg button");
   segs.forEach(sb=>sb.onclick=()=>{segs.forEach(x=>x.classList.remove("on"));sb.classList.add("on");status=sb.dataset.s;drawProg();});
 
   const commit=async(extra={})=>{
-    Object.assign(b,{status,rating,currentPage:cur,cover,series:$("#dSeries").value.trim(),notes:$("#dNotes").value,
+    Object.assign(b,{status,rating,currentPage:cur,cover,totalPages:parseInt($("#dPages").value)||0,series:$("#dSeries").value.trim(),notes:$("#dNotes").value,
       dateStarted:$("#dStart").value,dateFinished:$("#dFin").value},extra);
     await dbPut(b); books=await dbAll(); closeSheets(); render();
   };
