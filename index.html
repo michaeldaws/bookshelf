@@ -668,7 +668,8 @@ function openDetail(id){
         <button data-d="1">+1</button><button data-d="10">+10</button>
         <button data-set="0">Restart</button>${tp?`<button data-set="${tp}">Done</button>`:""}
       </div></div>`;
-    const upd=v=>{cur=Math.max(0,Math.min(tp||v,v));$("#curLbl").textContent=cur;if(tp){$("#pbar").style.width=Math.min(100,cur/tp*100)+"%";const r=$("#dRange");if(r)r.value=cur;}};
+    const upd=v=>{cur=Math.max(0,Math.min(tp||v,v));$("#curLbl").textContent=cur;if(tp){$("#pbar").style.width=Math.min(100,cur/tp*100)+"%";const r=$("#dRange");if(r)r.value=cur;}
+      if(status==="read"&&tp&&cur<tp){status="reading";body.querySelectorAll("#dSeg button").forEach(x=>x.classList.toggle("on",x.dataset.s===status));const fin=$("#dFin");if(fin)fin.value="";toast("Moved back to Currently reading");}};
     const r=$("#dRange"); if(r)r.oninput=e=>upd(+e.target.value);
     dp.querySelectorAll(".pg-quick button").forEach(btn=>btn.onclick=()=>{
       if(btn.dataset.set!=null)upd(+btn.dataset.set); else upd(cur+ +btn.dataset.d);});
