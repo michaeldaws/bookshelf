@@ -305,6 +305,10 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
     <label class="btn ghost" style="margin-top:10px">Import from backup
       <input type="file" id="importFile" accept="application/json" hidden>
     </label>
+    <div class="field" style="margin-top:24px"><label>Google Books API key (optional)</label>
+      <div class="isbn-row"><input id="gbKeyInput" placeholder="Paste key for richer lookups"><button class="btn sm" id="gbKeySave">Save</button></div>
+      <p class="muted" style="font-size:12px;margin-top:7px;line-height:1.5">Lookups already work without this via Open Library. A free key gives you your own Google Books quota (≈1,000/day) for better covers and page counts. To make one: open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" style="color:var(--ox)">console.cloud.google.com</a> → create a project → enable “Books API” → Credentials → Create credentials → API key → paste it here.</p>
+    </div>
     <p class="muted" style="margin-top:22px;font-size:12.5px">Margins — a single-file reading log. Add to your home screen for a full-screen app. Camera scanning needs the page served over HTTPS.</p>
   </div>
 </div>
@@ -333,7 +337,7 @@ async function metaGet(key){const db=await openDB();return new Promise((res,rej)
 async function metaSet(key,value){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(META,"readwrite");tx.objectStore(META).put({key,value});tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 /* ---------- State / helpers ---------- */
-let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null;
+let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey="";
 const $=s=>document.querySelector(s); const main=$("#main");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const todayISO=()=>new Date().toISOString().slice(0,10);
@@ -556,7 +560,8 @@ function isbnForm(){
     const data=await lookupISBN(isbn);
     if(data)bookForm(data);
     else{
-      const why=lookupDiag?` <span class="muted" style="display:block;margin-top:6px;font-size:12.5px">${esc(lookupDiag)}</span>`:"";
+      let why=lookupDiag?` <span class="muted" style="display:block;margin-top:6px;font-size:12.5px">${esc(lookupDiag)}</span>`:"";
+      if(/quota/i.test(lookupDiag))why+=`<span class="muted" style="display:block;margin-top:6px;font-size:12.5px">Tip: add a free Google Books API key in Settings for your own quota.</span>`;
       $("#isbnMsg").innerHTML=`No match found online.${why}<button class="btn sm" id="isbnManual" style="margin-top:10px">Add it manually</button>`;
       $("#isbnManual").onclick=()=>bookForm({isbn});
     }
@@ -702,7 +707,7 @@ const complete=r=>r&&r.title&&r.author&&r.totalPages&&r.cover;
 
 async function srcGoogle(isbn){
   try{
-    const r=await fetch("https://www.googleapis.com/books/v1/volumes?country=US&q=isbn:"+isbn);
+    const r=await fetch("https://www.googleapis.com/books/v1/volumes?country=US&q=isbn:"+isbn+(gbKey?"&key="+encodeURIComponent(gbKey):""));
     let d; try{d=await r.json();}catch(_){d={};}
     if(d.error){lookupDiag="Google Books error: "+(d.error.message||r.status);return null;}
     if(!r.ok){lookupDiag="Google Books returned "+r.status;return null;}
@@ -739,13 +744,13 @@ async function lookupISBN(raw){
   lookupDiag="";
   const variants=isbnVariants(raw);
   if(!variants[0]||variants[0].length<10){lookupDiag="That ISBN isn't 10 or 13 digits.";return null;}
+  // With your own key, Google is reliable and best → try first. Otherwise Open Library leads (no key, no quota).
+  const sources=gbKey?[srcGoogle,srcOpenLib,srcOpenLibSearch]:[srcOpenLib,srcOpenLibSearch,srcGoogle];
   let best=null;
-  // pass 1: Google for every variant
-  for(const isbn of variants){const g=await srcGoogle(isbn);if(g)best=merge(best,g);if(complete(best))break;}
-  // pass 2: Open Library editions API
-  if(!complete(best))for(const isbn of variants){const o=await srcOpenLib(isbn);if(o)best=merge(best,o);if(complete(best))break;}
-  // pass 3: Open Library search index
-  if(!best||!best.title)for(const isbn of variants){const s=await srcOpenLibSearch(isbn);if(s)best=merge(best,s);if(best&&best.title)break;}
+  for(const src of sources){
+    for(const isbn of variants){const r=await src(isbn);if(r)best=merge(best,r);if(complete(best))break;}
+    if(complete(best))break;
+  }
   if(!best||!best.title)return null;
   lookupDiag="";
   // cover fallback: Open Library covers-by-ISBN (default=false → 404 when missing)
@@ -822,15 +827,16 @@ async function importData(file){
 
 /* ---------- Wire up ---------- */
 $("#addBtn").onclick=openAdd;
-$("#settingsBtn").onclick=()=>{showSheet("#setSheet");updateBackupStatus();};
+$("#settingsBtn").onclick=()=>{showSheet("#setSheet");updateBackupStatus();$("#gbKeyInput").value=gbKey||"";};
 $("#closeScan").onclick=stopScan;
 $("#scrim").onclick=closeSheets;
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeSheets);
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.view;render();});
 $("#exportBtn").onclick=exportData;
 $("#importFile").onchange=e=>{if(e.target.files[0])importData(e.target.files[0]);};
+$("#gbKeySave").onclick=async()=>{gbKey=$("#gbKeyInput").value.trim();await metaSet("gbKey",gbKey);toast(gbKey?"API key saved":"API key cleared");};
 
-(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); render(); })();
+(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); gbKey=await metaGet("gbKey")||""; render(); })();
 </script>
 </body>
 </html>
