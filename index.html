@@ -304,7 +304,19 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
     <label class="btn ghost" style="margin-top:10px">Import from backup
       <input type="file" id="importFile" accept="application/json" hidden>
     </label>
-    <div class="field" style="margin-top:24px"><label>Google Books API key (optional)</label>
+    <div class="field" style="margin-top:24px"><label>Google Books region</label>
+      <select id="gbCountrySelect">
+        <option value="NO">Norway (NO)</option>
+        <option value="GB">United Kingdom (GB)</option>
+        <option value="US">United States (US)</option>
+        <option value="SE">Sweden (SE)</option>
+        <option value="DK">Denmark (DK)</option>
+        <option value="DE">Germany (DE)</option>
+        <option value="FR">France (FR)</option>
+      </select>
+      <p class="muted" style="font-size:12px;margin-top:6px">Tells Google Books which regional edition to surface first. NO for Norwegian books, GB for UK editions. US is always tried as a fallback.</p>
+    </div>
+    <div class="field" style="margin-top:14px"><label>Google Books API key (optional)</label>
       <div class="isbn-row"><input id="gbKeyInput" placeholder="Paste key for richer lookups"><button class="btn sm" id="gbKeySave">Save</button></div>
       <p class="muted" style="font-size:12px;margin-top:7px;line-height:1.5">Lookups already work without this via Open Library. A free key gives you your own Google Books quota (≈1,000/day) for better covers and page counts. To make one: open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" style="color:var(--ox)">console.cloud.google.com</a> → create a project → enable “Books API” → Credentials → Create credentials → API key → paste it here.</p>
     </div>
@@ -336,7 +348,7 @@ async function metaGet(key){const db=await openDB();return new Promise((res,rej)
 async function metaSet(key,value){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(META,"readwrite");tx.objectStore(META).put({key,value});tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 /* ---------- State / helpers ---------- */
-let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey="";
+let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey=""; let gbCountry="NO";
 const $=s=>document.querySelector(s); const main=$("#main");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const todayISO=()=>new Date().toISOString().slice(0,10);
@@ -706,9 +718,10 @@ function isbnVariants(raw){const base=cleanISBN(raw);const set=new Set([base]);i
 function merge(a,b){if(!a)return {...b};return {title:a.title||b.title,author:a.author||b.author,totalPages:a.totalPages||b.totalPages,cover:a.cover||b.cover};}
 const complete=r=>r&&r.title&&r.author&&r.totalPages&&r.cover;
 
-async function srcGoogle(isbn){
+async function srcGoogle(isbn,country){
   try{
-    const r=await fetch("https://www.googleapis.com/books/v1/volumes?country=US&q=isbn:"+isbn+(gbKey?"&key="+encodeURIComponent(gbKey):""));
+    const c=country||gbCountry||"NO";
+    const r=await fetch("https://www.googleapis.com/books/v1/volumes?country="+c+"&q=isbn:"+isbn+(gbKey?"&key="+encodeURIComponent(gbKey):""));
     let d; try{d=await r.json();}catch(_){d={};}
     if(d.error){lookupDiag="Google Books error: "+(d.error.message||r.status);return null;}
     if(!r.ok){lookupDiag="Google Books returned "+r.status;return null;}
@@ -745,12 +758,23 @@ async function lookupISBN(raw){
   lookupDiag="";
   const variants=isbnVariants(raw);
   if(!variants[0]||variants[0].length<10){lookupDiag="That ISBN isn't 10 or 13 digits.";return null;}
-  // With your own key, Google is reliable and best → try first. Otherwise Open Library leads (no key, no quota).
-  const sources=gbKey?[srcGoogle,srcOpenLib,srcOpenLibSearch]:[srcOpenLib,srcOpenLibSearch,srcGoogle];
+  const country=gbCountry||"NO";
   let best=null;
-  for(const src of sources){
-    for(const isbn of variants){const r=await src(isbn);if(r)best=merge(best,r);if(complete(best))break;}
-    if(complete(best))break;
+  const tryGoogle=async(c)=>{for(const isbn of variants){const r=await srcGoogle(isbn,c);if(r){best=merge(best,r);if(complete(best))return;}}};
+  const tryOL   =async()=>{for(const isbn of variants){const r=await srcOpenLib(isbn);if(r){best=merge(best,r);if(complete(best))return;}}};
+  const tryOLS  =async()=>{for(const isbn of variants){const r=await srcOpenLibSearch(isbn);if(r){best=merge(best,r);if(complete(best))return;}}};
+  if(gbKey){
+    // With key: Google (preferred region) → OL → OL search → Google US fallback
+    await tryGoogle(country);
+    if(!complete(best))await tryOL();
+    if(!complete(best))await tryOLS();
+    if(!complete(best)&&country!=="US")await tryGoogle("US");
+  }else{
+    // No key: OL leads (no quota) → OL search → Google preferred region → Google US fallback
+    await tryOL();
+    if(!complete(best))await tryOLS();
+    if(!complete(best))await tryGoogle(country);
+    if(!complete(best)&&country!=="US")await tryGoogle("US");
   }
   if(!best||!best.title)return null;
   lookupDiag="";
@@ -828,7 +852,7 @@ async function importData(file){
 
 /* ---------- Wire up ---------- */
 $("#addBtn").onclick=openAdd;
-$("#settingsBtn").onclick=()=>{showSheet("#setSheet");updateBackupStatus();$("#gbKeyInput").value=gbKey||"";};
+$("#settingsBtn").onclick=()=>{showSheet("#setSheet");updateBackupStatus();$("#gbKeyInput").value=gbKey||"";const cs=$("#gbCountrySelect");if(cs)cs.value=gbCountry||"NO";};
 $("#closeScan").onclick=stopScan;
 $("#scrim").onclick=closeSheets;
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeSheets);
@@ -836,8 +860,30 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.view;
 $("#exportBtn").onclick=exportData;
 $("#importFile").onchange=e=>{if(e.target.files[0])importData(e.target.files[0]);};
 $("#gbKeySave").onclick=async()=>{gbKey=$("#gbKeyInput").value.trim();await metaSet("gbKey",gbKey);toast(gbKey?"API key saved":"API key cleared");};
+$("#gbCountrySelect").onchange=async()=>{gbCountry=$("#gbCountrySelect").value;await metaSet("gbCountry",gbCountry);toast("Region set to "+gbCountry);};
 
-(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); gbKey=await metaGet("gbKey")||""; render(); })();
+/* ---------- PWA manifest with real PNG icons ---------- */
+async function setupManifest(){
+  try{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" fill="#2a2520"/><path d="M52 44h54a14 14 0 0 1 14 14v78a14 14 0 0 0-14-14H52z" fill="#c9a14a"/><path d="M128 44H74a14 14 0 0 0-14 14v78a14 14 0 0 1 14-14h54z" fill="#f3ead6"/><path d="M90 58v64" stroke="#7a2e2e" stroke-width="4"/></svg>`;
+    const svgUrl="data:image/svg+xml,"+encodeURIComponent(svg);
+    const toPNG=sz=>new Promise(res=>{
+      const img=new Image();
+      img.onload=()=>{const c=document.createElement("canvas");c.width=c.height=sz;c.getContext("2d").drawImage(img,0,0,sz,sz);c.toBlob(b=>res(b?URL.createObjectURL(b):null),"image/png");};
+      img.onerror=()=>res(null); img.src=svgUrl;
+    });
+    const [i192,i512]=await Promise.all([toPNG(192),toPNG(512)]);
+    if(!i192)return;
+    const icons=[{src:i192,sizes:"192x192",type:"image/png",purpose:"any maskable"}];
+    if(i512)icons.push({src:i512,sizes:"512x512",type:"image/png",purpose:"any maskable"});
+    const mBlob=new Blob([JSON.stringify({name:"Margins — Reading Log",short_name:"Margins",start_url:"./",display:"standalone",background_color:"#f3ead6",theme_color:"#2a2520",icons})],{type:"application/manifest+json"});
+    const link=document.querySelector("link[rel=manifest]");
+    if(link)link.href=URL.createObjectURL(mBlob);
+  }catch(e){}
+}
+setupManifest();
+
+(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); gbKey=await metaGet("gbKey")||""; gbCountry=await metaGet("gbCountry")||"NO"; render(); })();
 </script>
 </body>
 </html>
