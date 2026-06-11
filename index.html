@@ -718,6 +718,39 @@ function isbnVariants(raw){const base=cleanISBN(raw);const set=new Set([base]);i
 function merge(a,b){if(!a)return {...b};return {title:a.title||b.title,author:a.author||b.author,totalPages:a.totalPages||b.totalPages,cover:a.cover||b.cover};}
 const complete=r=>r&&r.title&&r.author&&r.totalPages&&r.cover;
 
+// Derive the most likely Google Books country code from the ISBN group identifier.
+// ISBN-13: digits 3–4 onward (after the 978/979 prefix) encode the registration group.
+// ISBN-10: digits 0–1 onward encode the same group directly.
+function isbnCountry(raw){
+  const base=cleanISBN(raw);
+  // Normalise to the group segment (strip 978/979 prefix for ISBN-13)
+  const g=base.length===13?base.slice(3):base.length===10?base:null;
+  if(!g)return null;
+  // Two-digit groups (checked before single-digit to avoid prefix collision)
+  const g2=g.slice(0,2);
+  if(g2==="82")return"NO"; // Norway
+  if(g2==="87")return"DK"; // Denmark
+  if(g2==="91")return"SE"; // Sweden
+  if(g2==="85")return"BR"; // Brazil
+  if(g2==="84")return"ES"; // Spain
+  if(g2==="88")return"IT"; // Italy
+  if(g2==="86")return"RS"; // Serbia/Yugoslavia legacy
+  if(g2==="89")return"KR"; // Korea
+  if(g2==="90")return"NL"; // Netherlands
+  if(g2==="93")return"IN"; // India
+  if(g2==="94")return"NL"; // Netherlands (overflow)
+  if(g2==="99")return null; // misc micro-nations — don't guess
+  // Single-digit groups
+  const g1=g.slice(0,1);
+  if(g1==="0"||g1==="1")return"GB"; // English-language (prefer GB; US tried as fallback anyway)
+  if(g1==="2")return"FR";
+  if(g1==="3")return"DE";
+  if(g1==="4")return"JP";
+  if(g1==="5")return"RU";
+  if(g1==="7")return"CN";
+  return null; // unknown — fall back to user setting
+}
+
 async function srcGoogle(isbn,country){
   try{
     const c=country||gbCountry||"NO";
@@ -758,7 +791,9 @@ async function lookupISBN(raw){
   lookupDiag="";
   const variants=isbnVariants(raw);
   if(!variants[0]||variants[0].length<10){lookupDiag="That ISBN isn't 10 or 13 digits.";return null;}
-  const country=gbCountry||"NO";
+  // Auto-detect country from ISBN group; fall back to user's manual setting
+  const isbn13=variants.find(v=>v.length===13)||variants[0];
+  const country=isbnCountry(isbn13)||gbCountry||"NO";
   let best=null;
   const tryGoogle=async(c)=>{for(const isbn of variants){const r=await srcGoogle(isbn,c);if(r){best=merge(best,r);if(complete(best))return;}}};
   const tryOL   =async()=>{for(const isbn of variants){const r=await srcOpenLib(isbn);if(r){best=merge(best,r);if(complete(best))return;}}};
