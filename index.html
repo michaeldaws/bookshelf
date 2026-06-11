@@ -114,6 +114,24 @@ main{flex:1;padding:6px 18px 120px}
 .chip{flex:none;padding:7px 14px;border-radius:22px;border:1px solid var(--line);background:var(--card);font-size:14px;color:var(--ink-soft);white-space:nowrap}
 .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 
+/* Reading activity heatmap */
+.hm-wrap{overflow-x:auto;overflow-y:hidden;margin:8px 0 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.hm-wrap::-webkit-scrollbar{display:none}
+.hm-wrap svg{display:block}
+.hm-lbl{font-family:"Spline Sans Mono",monospace;font-size:8px;fill:var(--ink-soft)}
+.hm0{fill:var(--paper-2)}.hm-fut{fill:var(--paper-2);opacity:.3}
+.hm1{fill:color-mix(in srgb,var(--ox) 22%,var(--paper-2))}
+.hm2{fill:color-mix(in srgb,var(--ox) 44%,var(--paper-2))}
+.hm3{fill:color-mix(in srgb,var(--ox) 68%,var(--paper-2))}
+.hm4{fill:var(--ox)}
+/* Weekly bar chart */
+.chart-wrap{margin:2px 0 12px}
+.c-bar{fill:var(--gold-soft)}.c-bar-now{fill:var(--gold)}
+.c-lbl{font-family:"Spline Sans Mono",monospace;font-size:9px;fill:var(--ink-soft);text-anchor:middle}
+.c-ylbl{font-family:"Spline Sans Mono",monospace;font-size:9px;fill:var(--ink-soft);text-anchor:end}
+.c-axis{stroke:var(--line);stroke-width:1;fill:none}
+.c-grid{stroke:var(--line);stroke-width:.5;stroke-dasharray:3 3;fill:none}
+
 /* Reading goal */
 .goal-card{display:flex;align-items:center;gap:16px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow);margin:6px 0 4px}
 .goal-card.empty-goal{cursor:pointer}
@@ -450,6 +468,83 @@ function renderAuthors(){
   return h+`</div>`;
 }
 
+/* ---------- Reading activity ---------- */
+function getReadingActivity(){
+  const agg={};
+  books.forEach(b=>{(b.readingLog||[]).forEach(e=>{if(e.date&&e.pages>0)agg[e.date]=(agg[e.date]||0)+e.pages;});});
+  return agg;
+}
+
+function renderHeatmap(agg){
+  const CS=14,CI=11,WEEKS=52;
+  const today=new Date();today.setHours(0,0,0,0);
+  const todayStr=todayISO();
+  const start=new Date(today);
+  start.setDate(today.getDate()-(WEEKS-1)*7);
+  const dow=start.getDay();
+  start.setDate(start.getDate()-(dow===0?6:dow-1));
+  const vals=Object.values(agg).filter(v=>v>0);
+  const maxP=vals.length?Math.max(...vals):1;
+  const lv=p=>{if(!p)return 0;const r=p/maxP;return r<.2?1:r<.45?2:r<.72?3:4;};
+  // Month labels
+  let mL='';let lastM=-1;const dm=new Date(start);
+  for(let w=0;w<WEEKS;w++){const m=dm.getMonth();if(m!==lastM){mL+=`<text x="${w*CS}" y="9" class="hm-lbl">${dm.toLocaleDateString(undefined,{month:"short"})}</text>`;lastM=m;}dm.setDate(dm.getDate()+7);}
+  // Day labels (M W F)
+  const dL=['M','','W','','F','',''].map((n,i)=>n?`<text x="-2" y="${14+i*CS+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">${n}</text>`:'').join('');
+  // Cells
+  let cells='';const dc=new Date(start);
+  const futureDate=new Date(today.getTime()+86400000);
+  for(let w=0;w<WEEKS;w++){
+    for(let d=0;d<7;d++){
+      const ds=dc.toISOString().slice(0,10);
+      const isFut=dc>=futureDate;
+      const pg=agg[ds]||0;
+      const cls=isFut?'hm-fut':'hm'+lv(pg);
+      const hi=ds===todayStr?' stroke="var(--gold-soft)" stroke-width="1.5"':'';
+      cells+=`<rect x="${w*CS}" y="${14+d*CS}" width="${CI}" height="${CI}" rx="2" class="${cls}"${hi}/>`;
+      dc.setDate(dc.getDate()+1);
+    }
+  }
+  const W=WEEKS*CS,H=14+7*CS;
+  // Legend
+  const lx=W-4*CS,ly=H+12;
+  const leg=[0,1,2,3,4].map((l,i)=>`<rect x="${lx+i*CS}" y="${ly}" width="${CI}" height="${CI}" rx="2" class="hm${l}"/>`).join('')+
+    `<text x="${lx-3}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">Less</text>`+
+    `<text x="${lx+5*CS}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle">More</text>`;
+  return `<div class="hm-wrap"><svg viewBox="-18 0 ${W+18} ${H+26}" height="${H+26}" style="min-width:${W+18}px">${mL}${dL}${cells}${leg}</svg></div>`;
+}
+
+function renderWeeklyBars(agg){
+  const today=new Date();today.setHours(0,0,0,0);
+  const dow=today.getDay();
+  const weekStart=new Date(today);
+  weekStart.setDate(today.getDate()-(dow===0?6:dow-1));
+  const N=13;
+  const weeks=[];
+  for(let w=N-1;w>=0;w--){
+    const ws=new Date(weekStart);ws.setDate(weekStart.getDate()-w*7);
+    let total=0;
+    for(let d=0;d<7;d++){const dd=new Date(ws);dd.setDate(ws.getDate()+d);total+=(agg[dd.toISOString().slice(0,10)]||0);}
+    weeks.push({total,label:ws.toLocaleDateString(undefined,{month:"short",day:"numeric"}),isCur:w===0});
+  }
+  const maxP=Math.max(...weeks.map(w=>w.total),1);
+  const tickMax=Math.max(Math.ceil(maxP/25)*25,25);
+  const VW=520,VH=130,ML=38,MT=8,MB=28,MR=8;
+  const cw=VW-ML-MR,ch=VH-MT-MB;
+  const slot=cw/N,bW=Math.round(slot*.68);
+  const ticks=[0,Math.round(tickMax/2),tickMax];
+  const axes=ticks.map(t=>{const y=MT+ch*(1-t/tickMax);return `<line x1="${ML}" x2="${ML+cw}" y1="${y}" y2="${y}" class="c-grid"/><text x="${ML-4}" y="${y}" class="c-ylbl" dominant-baseline="middle">${t}</text>`;}).join('');
+  const bars=weeks.map((w,i)=>{
+    const x=ML+i*slot+(slot-bW)/2;
+    const bh=Math.max(ch*(w.total/tickMax),w.total>0?2:0);
+    const y=MT+ch-bh;
+    const lbl=(i===0||i===4||i===8||i===12)?`<text x="${x+bW/2}" y="${MT+ch+16}" class="c-lbl">${w.label}</text>`:'';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bW}" height="${bh.toFixed(1)}" rx="2" class="${w.isCur?'c-bar-now':'c-bar'}"/>${lbl}`;
+  }).join('');
+  return `<div class="chart-wrap"><svg viewBox="0 0 ${VW} ${VH}" style="width:100%"><line x1="${ML}" x2="${ML}" y1="${MT}" y2="${MT+ch}" class="c-axis"/><line x1="${ML}" x2="${ML+cw}" y1="${MT+ch}" y2="${MT+ch}" class="c-axis"/>${axes}${bars}</svg></div>`;
+}
+
+
 function renderStats(){
   const read=books.filter(b=>b.status==="read");
   const yr=d=>new Date(d+"T00:00:00").getFullYear();
@@ -469,13 +564,26 @@ function renderStats(){
   const pages=inRange.reduce((s,b)=>s+(+b.totalPages||0),0);
   const thisYear=read.filter(b=>b.dateFinished&&yr(b.dateFinished)===new Date().getFullYear()).length;
   const cy=new Date().getFullYear();
+  const agg=getReadingActivity();
+  const loggedPages=Object.values(agg).reduce((s,v)=>s+v,0);
+  const activeDays=Object.keys(agg).filter(k=>agg[k]>0).length;
   let h=`<div class="view">
     ${goalCard(cy,thisYear,goals[cy]||0)}
     <div class="stat-grid">
       <div class="stat"><div class="n">${read.length}</div><div class="l">Books read</div></div>
       <div class="stat"><div class="n">${thisYear}</div><div class="l">This year</div></div>
+    </div>`;
+  if(activeDays>0){
+    h+=`<div class="section-title"><h2>Reading activity</h2></div>
+    <div class="stat-grid" style="margin-top:0">
+      <div class="stat"><div class="n">${loggedPages.toLocaleString()}</div><div class="l">Pages logged</div></div>
+      <div class="stat"><div class="n">${activeDays}</div><div class="l">Days active</div></div>
     </div>
-    <div class="section-title"><h2>Read recently</h2></div>
+    ${renderHeatmap(agg)}
+    <p class="muted" style="font-size:12px;margin:10px 4px 0">Pages per week · last 13 weeks</p>
+    ${renderWeeklyBars(agg)}`;
+  }
+  h+=`<div class="section-title"><h2>Read recently</h2></div>
     <div class="chips">`;
   ranges.forEach(r=>h+=`<button class="chip ${(!yearFilter&&r.m===recentRange)?"on":""}" data-m="${r.m}">${r.l}</button>`);
   h+=`</div>`;
@@ -661,6 +769,7 @@ function openDetail(id){
     <button class="del" id="dDelete">Remove from library</button>`;
 
   let rating=b.rating||0, status=b.status, cur=b.currentPage||0, cover=b.cover||null;
+  const origPage=b.currentPage||0; // snapshot for session delta logging
   const stars=body.querySelectorAll("#stars span");
   stars.forEach(st=>st.onclick=()=>{rating=+st.dataset.n;stars.forEach(x=>x.classList.toggle("on",+x.dataset.n<=rating));});
   const setCover=src=>{cover=src;const cc=body.querySelector(".cover-pick .cover");if(cc)cc.innerHTML='<img alt="" src="'+src+'">';};
@@ -697,6 +806,16 @@ function openDetail(id){
   segs.forEach(sb=>sb.onclick=()=>{segs.forEach(x=>x.classList.remove("on"));sb.classList.add("on");status=sb.dataset.s;drawProg();});
 
   const commit=async(extra={})=>{
+    const finalPage=extra.currentPage!==undefined?extra.currentPage:cur;
+    const delta=finalPage-origPage;
+    if(delta>0){
+      const log=[...(b.readingLog||[])];
+      const today=todayISO();
+      const idx=log.findIndex(e=>e.date===today);
+      if(idx>=0)log[idx]={date:today,pages:log[idx].pages+delta};
+      else log.push({date:today,pages:delta});
+      b.readingLog=log;
+    }
     Object.assign(b,{status,rating,currentPage:cur,cover,totalPages:parseInt($("#dPages").value)||0,series:$("#dSeries").value.trim(),notes:$("#dNotes").value,
       dateStarted:$("#dStart").value,dateFinished:$("#dFin").value},extra);
     await dbPut(b); books=await dbAll(); closeSheets(); render();
