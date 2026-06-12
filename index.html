@@ -784,7 +784,8 @@ function openDetail(id){
     <button class="del" id="dDelete">Remove from library</button>`;
 
   let rating=b.rating||0, status=b.status, cur=b.currentPage||0, cover=b.cover||null;
-  const origPage=b.currentPage||0; // snapshot for session delta logging
+  const origPage=b.currentPage||0;
+  const origStatus=b.status; // used to guard reading-session logging
   const starEls=body.querySelectorAll("#stars span");
   const refreshStars=()=>starEls.forEach(s=>{const n=+s.dataset.n;s.className=rating>=n?'sf':rating>=n-.5?'sh':'se';});
   starEls.forEach(st=>st.onclick=e=>{
@@ -808,6 +809,14 @@ function openDetail(id){
     const dp=$("#dProg");
     if(status==="want"){dp.innerHTML="";return;}
     const tp=b.totalPages||0;
+    if(status==="read"){
+      // Finished — show completed state, no interactive slider (prevents accidental touches)
+      dp.innerHTML=`<div class="field"><div class="prog-row" style="padding:4px 0;margin-top:0">
+        <span style="color:var(--green);font-style:italic">✓ Completed${tp?" · "+tp+" pages":""}</span>
+        <span class="muted" style="font-size:12px">Change status to edit progress</span>
+      </div></div>`;
+      return;
+    }
     dp.innerHTML=`<div class="field"><label>Progress — page <span class="mono" id="curLbl">${cur}</span> of ${tp||"?"} (${tp?Math.round(cur/tp*100):0}%)</label>
       <div class="bar"><span id="pbar" style="width:${tp?Math.min(100,cur/tp*100):0}%"></span></div>
       ${tp?`<input class="range" type="range" id="dRange" min="0" max="${tp}" value="${cur}">`:`<p class="muted">Add a total page count to track progress.</p>`}
@@ -816,8 +825,7 @@ function openDetail(id){
         <button data-d="1">+1</button><button data-d="10">+10</button>
         <button data-set="0">Restart</button>${tp?`<button data-set="${tp}">Done</button>`:""}
       </div></div>`;
-    const upd=v=>{cur=Math.max(0,Math.min(tp||v,v));$("#curLbl").textContent=cur;if(tp){$("#pbar").style.width=Math.min(100,cur/tp*100)+"%";const r=$("#dRange");if(r)r.value=cur;}
-      if(status==="read"&&tp&&cur<tp){status="reading";body.querySelectorAll("#dSeg button").forEach(x=>x.classList.toggle("on",x.dataset.s===status));const fin=$("#dFin");if(fin)fin.value="";toast("Moved back to Currently reading");}};
+    const upd=v=>{cur=Math.max(0,Math.min(tp||v,v));$("#curLbl").textContent=cur;if(tp){$("#pbar").style.width=Math.min(100,cur/tp*100)+"%";const r=$("#dRange");if(r)r.value=cur;}};
     const r=$("#dRange"); if(r)r.oninput=e=>upd(+e.target.value);
     dp.querySelectorAll(".pg-quick button").forEach(btn=>btn.onclick=()=>{
       if(btn.dataset.set!=null)upd(+btn.dataset.set); else upd(cur+ +btn.dataset.d);});
@@ -830,7 +838,7 @@ function openDetail(id){
   const commit=async(extra={})=>{
     const finalPage=extra.currentPage!==undefined?extra.currentPage:cur;
     const delta=finalPage-origPage;
-    if(delta>0){
+    if(delta>0&&origStatus==="reading"){
       const log=[...(b.readingLog||[])];
       const today=todayISO();
       const idx=log.findIndex(e=>e.date===today);
