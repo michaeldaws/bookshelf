@@ -119,10 +119,10 @@ main{flex:1;padding:6px 18px 120px}
 .hm-wrap::-webkit-scrollbar{display:none}
 .hm-wrap svg{display:block}
 .hm-lbl{font-family:"Spline Sans Mono",monospace;font-size:8px;fill:var(--ink-soft)}
-.hm0{fill:var(--paper-2)}.hm-fut{fill:var(--paper-2);opacity:.3}
-.hm1{fill:color-mix(in srgb,var(--ox) 22%,var(--paper-2))}
-.hm2{fill:color-mix(in srgb,var(--ox) 44%,var(--paper-2))}
-.hm3{fill:color-mix(in srgb,var(--ox) 68%,var(--paper-2))}
+.hm0{fill:#1a1614}
+.hm1{fill:color-mix(in srgb,var(--ox) 28%,#1a1614)}
+.hm2{fill:color-mix(in srgb,var(--ox) 52%,#1a1614)}
+.hm3{fill:color-mix(in srgb,var(--ox) 76%,#1a1614)}
 .hm4{fill:var(--ox)}
 /* Weekly bar chart */
 .chart-wrap{margin:2px 0 12px}
@@ -479,38 +479,42 @@ function renderHeatmap(agg){
   const CS=14,CI=11,WEEKS=52;
   const today=new Date();today.setHours(0,0,0,0);
   const todayStr=todayISO();
-  const start=new Date(today);
-  start.setDate(today.getDate()-(WEEKS-1)*7);
-  const dow=start.getDay();
-  start.setDate(start.getDate()-(dow===0?6:dow-1));
+  // Monday of the current week — this becomes column 0 (leftmost)
+  const dow=today.getDay();
+  const weekStart=new Date(today);
+  weekStart.setDate(today.getDate()-(dow===0?6:dow-1));
   const vals=Object.values(agg).filter(v=>v>0);
   const maxP=vals.length?Math.max(...vals):1;
-  const lv=p=>{if(!p)return 0;const r=p/maxP;return r<.2?1:r<.45?2:r<.72?3:4;};
-  // Month labels
-  let mL='';let lastM=-1;const dm=new Date(start);
-  for(let w=0;w<WEEKS;w++){const m=dm.getMonth();if(m!==lastM){mL+=`<text x="${w*CS}" y="9" class="hm-lbl">${dm.toLocaleDateString(undefined,{month:"short"})}</text>`;lastM=m;}dm.setDate(dm.getDate()+7);}
+  // Exact quartile thresholds: ≤25% → 1, ≤50% → 2, ≤75% → 3, >75% → 4
+  const lv=p=>{if(!p)return 0;const r=p/maxP;return r<=.25?1:r<=.5?2:r<=.75?3:4;};
+  // Month labels (w=0 is this week, w=51 is oldest — left=recent, right=past)
+  let mL='';let lastM=-1;
+  for(let w=0;w<WEEKS;w++){
+    const ws=new Date(weekStart);ws.setDate(weekStart.getDate()-w*7);
+    const m=ws.getMonth();
+    if(m!==lastM){mL+=`<text x="${w*CS}" y="9" class="hm-lbl">${ws.toLocaleDateString(undefined,{month:"short"})}</text>`;lastM=m;}
+  }
   // Day labels (M W F)
   const dL=['M','','W','','F','',''].map((n,i)=>n?`<text x="-2" y="${14+i*CS+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">${n}</text>`:'').join('');
-  // Cells
-  let cells='';const dc=new Date(start);
+  // Cells: w=0 → this week (leftmost), w=51 → oldest (rightmost)
+  let cells='';
   const futureDate=new Date(today.getTime()+86400000);
   for(let w=0;w<WEEKS;w++){
     for(let d=0;d<7;d++){
+      const dc=new Date(weekStart);dc.setDate(weekStart.getDate()-w*7+d);
       const ds=dc.toISOString().slice(0,10);
-      const isFut=dc>=futureDate;
-      const pg=agg[ds]||0;
-      const cls=isFut?'hm-fut':'hm'+lv(pg);
+      const pg=(dc<futureDate)?(agg[ds]||0):0; // future days = 0 (black)
+      const cls='hm'+lv(pg);
       const hi=ds===todayStr?' stroke="var(--gold-soft)" stroke-width="1.5"':'';
       cells+=`<rect x="${w*CS}" y="${14+d*CS}" width="${CI}" height="${CI}" rx="2" class="${cls}"${hi}/>`;
-      dc.setDate(dc.getDate()+1);
     }
   }
   const W=WEEKS*CS,H=14+7*CS;
   // Legend
-  const lx=W-4*CS,ly=H+12;
+  const lx=W-5*CS,ly=H+12;
   const leg=[0,1,2,3,4].map((l,i)=>`<rect x="${lx+i*CS}" y="${ly}" width="${CI}" height="${CI}" rx="2" class="hm${l}"/>`).join('')+
-    `<text x="${lx-3}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">Less</text>`+
-    `<text x="${lx+5*CS}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle">More</text>`;
+    `<text x="${lx-3}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">None</text>`+
+    `<text x="${lx+5*CS}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle">Max</text>`;
   return `<div class="hm-wrap"><svg viewBox="-18 0 ${W+18} ${H+26}" height="${H+26}" style="min-width:${W+18}px">${mL}${dL}${cells}${leg}</svg></div>`;
 }
 
