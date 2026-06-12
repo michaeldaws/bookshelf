@@ -230,9 +230,12 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
 .cover-pick:active{transform:scale(.97)}
 .rebtn{margin-top:11px;align-self:flex-start;font-family:"Spline Sans Mono",monospace;font-size:11px;color:var(--ox);border:1px solid var(--line);border-radius:9px;padding:7px 11px;background:var(--card)}
 .rebtn:active{transform:scale(.96)}
-.stars{display:flex;gap:6px;margin-top:10px;font-size:24px;color:var(--gold)}
-.stars span{cursor:pointer;color:var(--line)}
-.stars span.on{color:var(--gold)}
+.stars{display:flex;gap:4px;margin-top:10px;font-size:26px}
+.stars span{cursor:pointer;display:inline-block;user-select:none}
+.sf,.stars .sf{color:var(--gold)}
+.se,.stars .se{color:var(--line)}
+.sh,.stars .sh{background:linear-gradient(90deg,var(--gold) 50%,var(--line) 50%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.star-disp{display:inline-flex;gap:2px;vertical-align:middle;font-size:14px;line-height:1}
 .range{width:100%;-webkit-appearance:none;appearance:none;height:8px;border-radius:6px;background:var(--paper-2);border:1px solid var(--line);margin-top:6px}
 .range::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--ox);border:3px solid var(--paper);box-shadow:var(--shadow)}
 .range::-moz-range-thumb{width:24px;height:24px;border:3px solid var(--paper);border-radius:50%;background:var(--ox)}
@@ -379,6 +382,12 @@ function coverHTML(b,cls=""){
   return `<div class="cover ${cls}"><span class="ph">${esc(b.title||"Untitled")}</span></div>`;
 }
 const pct=b=>{const t=+b.totalPages||0,c=+b.currentPage||0;return t>0?Math.min(100,Math.round(c/t*100)):0;};
+function renderStars(r){
+  if(!r)return '';
+  let h='';
+  for(let i=1;i<=5;i++)h+=`<span class="${r>=i?'sf':r>=i-.5?'sh':'se'}">★</span>`;
+  return `<span class="star-disp">${h}</span>`;
+}
 
 /* ---------- Views ---------- */
 function render(){
@@ -438,7 +447,7 @@ function renderShelf(){
     h+=`<div class="shelf-wrap"><div class="shelf">`;
     read.forEach(b=>{h+=`<div class="book" data-id="${b.id}">${coverHTML(b)}
       <div class="bt">${esc(b.title)}</div>
-      <div class="bd">${b.dateFinished?new Date(b.dateFinished+"T00:00:00").getFullYear():""}${b.rating?" · "+"★".repeat(b.rating):""}</div></div>`;});
+      <div class="bd">${b.dateFinished?new Date(b.dateFinished+"T00:00:00").getFullYear():""}${b.rating?" · "+renderStars(b.rating):""}</div></div>`;});
     h+=`</div><div class="board"></div></div>`;
   }
   h+=`</div>`; main.innerHTML=h;
@@ -460,7 +469,7 @@ function renderAuthors(){
       h+=`<div class="r-card" data-id="${b.id}">${coverHTML(b)}
         <div class="r-meta"><div class="r-title">${esc(b.title)}</div>
           ${b.series?`<div class="au-series">${esc(b.series)}</div>`:`<div class="r-author">${b.status==="read"&&b.dateFinished?new Date(b.dateFinished+"T00:00:00").getFullYear():""}</div>`}
-          <div class="prog-row" style="margin-top:auto;padding-top:9px"><span class="st-pill st-${b.status}">${stName[b.status]||""}</span><span>${b.rating?"★".repeat(b.rating):""}</span></div>
+          <div class="prog-row" style="margin-top:auto;padding-top:9px"><span class="st-pill st-${b.status}">${stName[b.status]||""}</span><span>${renderStars(b.rating)}</span></div>
         </div></div>`;
     });
     h+=`</div>`;
@@ -513,10 +522,10 @@ function renderHeatmap(agg){
   }
   const W=WEEKS*CS,H=14+7*CS;
   // Legend — placed bottom-left so it's visible without scrolling
-  const ly=H+12;
-  const leg=[0,1,2,3,4].map((l,i)=>`<rect x="${i*CS}" y="${ly}" width="${CI}" height="${CI}" rx="2" class="hm${l}"/>`).join('')+
-    `<text x="-2" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">None</text>`+
-    `<text x="${5*CS+2}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle">Max</text>`;
+  const ly=H+12, lx=22;
+  const leg=[0,1,2,3,4].map((l,i)=>`<rect x="${lx+i*CS}" y="${ly}" width="${CI}" height="${CI}" rx="2" class="hm${l}"/>`).join('')+
+    `<text x="${lx-3}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle" text-anchor="end">None</text>`+
+    `<text x="${lx+5*CS+2}" y="${ly+CI/2}" class="hm-lbl" dominant-baseline="middle">Max</text>`;
   return `<div class="hm-wrap"><svg viewBox="-18 0 ${W+18} ${H+26}" height="${H+26}" style="min-width:${W+18}px">${mL}${dL}${cells}${leg}</svg></div>`;
 }
 
@@ -606,7 +615,7 @@ function renderStats(){
     h+=`<div class="section-title" style="margin-top:18px"><h2>${yearFilter?"Read in "+yearFilter:"Finished"}</h2><span class="count">${inRange.length}</span></div>`;
     inRange.forEach(b=>{h+=`<div class="r-card" data-id="${b.id}">${coverHTML(b)}
       <div class="r-meta"><div class="r-title">${esc(b.title)}</div><div class="r-author">${esc(b.author||"Unknown")}</div>
-      <div class="prog-row" style="margin-top:auto;padding-top:10px"><span>Finished ${fmtDate(b.dateFinished)}</span><span>${b.rating?"★".repeat(b.rating):""}</span></div></div></div>`;});
+      <div class="prog-row" style="margin-top:auto;padding-top:10px"><span>Finished ${fmtDate(b.dateFinished)}</span><span>${renderStars(b.rating)}</span></div></div></div>`;});
   }else{
     h+=`<div class="empty"><p>No books finished in this window.</p></div>`;
   }
@@ -753,7 +762,7 @@ function openDetail(id){
       <label class="cover-pick">${coverHTML(b,"lg")}<span class="cam">Change</span>
         <input type="file" id="dCoverFile" accept="image/*" hidden></label>
       <div class="meta"><h2>${esc(b.title)}</h2><div class="au">${esc(b.author||"Unknown")}</div>
-        <div class="stars" id="stars">${[1,2,3,4,5].map(n=>`<span data-n="${n}" class="${n<=(b.rating||0)?"on":""}">★</span>`).join("")}</div>
+        <div class="stars" id="stars">${[1,2,3,4,5].map(n=>`<span data-n="${n}" class="${(b.rating||0)>=n?'sf':(b.rating||0)>=n-.5?'sh':'se'}">★</span>`).join("")}</div>
         ${b.isbn?`<button class="rebtn" id="dFetch">↻ Fetch cover &amp; details</button>`:""}
       </div></div>
     <div class="field"><label>Status</label>
@@ -776,8 +785,15 @@ function openDetail(id){
 
   let rating=b.rating||0, status=b.status, cur=b.currentPage||0, cover=b.cover||null;
   const origPage=b.currentPage||0; // snapshot for session delta logging
-  const stars=body.querySelectorAll("#stars span");
-  stars.forEach(st=>st.onclick=()=>{rating=+st.dataset.n;stars.forEach(x=>x.classList.toggle("on",+x.dataset.n<=rating));});
+  const starEls=body.querySelectorAll("#stars span");
+  const refreshStars=()=>starEls.forEach(s=>{const n=+s.dataset.n;s.className=rating>=n?'sf':rating>=n-.5?'sh':'se';});
+  starEls.forEach(st=>st.onclick=e=>{
+    const half=e.offsetX<st.offsetWidth/2;
+    const n=+st.dataset.n;
+    const newR=half?n-.5:n;
+    rating=(rating===newR&&!half)?0:newR; // tap same full star twice to clear
+    refreshStars();
+  });
   const setCover=src=>{cover=src;const cc=body.querySelector(".cover-pick .cover");if(cc)cc.innerHTML='<img alt="" src="'+src+'">';};
   $("#dCoverFile").onchange=e=>{const f=e.target.files[0];if(!f)return;const fr=new FileReader();fr.onload=()=>{setCover(fr.result);toast("Cover changed — tap Save to keep it");};fr.readAsDataURL(f);};
   if($("#dFetch"))$("#dFetch").onclick=async()=>{const btn=$("#dFetch");const old=btn.innerHTML;btn.innerHTML='<span class="spinner"></span>Fetching…';
