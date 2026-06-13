@@ -263,6 +263,15 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
 .backup-status{font-family:"Spline Sans Mono",monospace;font-size:12px;letter-spacing:.03em;color:var(--ink-soft);margin:0 0 14px}
 .backup-status.stale{color:var(--ox)}
 .del{color:var(--ox);text-align:center;width:100%;padding:14px;font-size:14px;margin-top:4px}
+
+/* Auto-save */
+.autosave-card{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}
+.autosave-icon{font-size:26px;flex:none;width:44px;height:44px;border-radius:12px;background:var(--paper-2);display:grid;place-items:center}
+.autosave-title{font-family:"Fraunces",serif;font-weight:600;font-size:16px;margin-bottom:3px}
+.autosave-info{font-size:13px;color:var(--ink-soft);line-height:1.4}
+.autosave-info b{color:var(--ink);font-weight:500}
+.autosave-warn{color:var(--ox)}
+.autosave-ok{color:var(--green)}
 </style>
 </head>
 <body>
@@ -319,7 +328,18 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
   <div class="grab"></div>
   <div class="sheet-head"><h2>Settings</h2><button class="x" data-close>Close</button></div>
   <div class="sheet-body">
-    <p class="muted" style="margin-top:0">Your library lives only on this device. Back it up now and then.</p>
+    <div class="autosave-card" id="autoSaveCard">
+      <div class="autosave-icon" id="autoSaveIcon">☁</div>
+      <div style="flex:1;min-width:0">
+        <div class="autosave-title">Auto-save backup</div>
+        <div id="autoSaveInfo" class="autosave-info">Checking…</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-bottom:18px">
+      <button class="btn ghost" id="autoSaveSetup">Set up file</button>
+      <button class="btn" id="autoSaveNow">Save now</button>
+    </div>
+    <p class="muted" style="margin-top:0">Manual backup and restore</p>
     <p id="backupStatus" class="backup-status"></p>
     <div id="exportFolderSection" style="display:none;margin-bottom:14px">
       <div class="field" style="margin-bottom:0"><label>Export folder</label>
@@ -378,7 +398,7 @@ async function metaGet(key){const db=await openDB();return new Promise((res,rej)
 async function metaSet(key,value){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(META,"readwrite");tx.objectStore(META).put({key,value});tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 /* ---------- State / helpers ---------- */
-let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey=""; let gbCountry="NO"; let exportDirHandle=null;
+let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey=""; let gbCountry="NO"; let exportDirHandle=null; let autoSaveHandle=null; let lastAutoSave=null; let autoSaveDt=null; let autoSaveOk=false;
 const $=s=>document.querySelector(s); const main=$("#main");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const todayISO=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
@@ -756,7 +776,7 @@ function bookForm(pre){
       dateStarted:status!=="want"?($("#fStart")?.value||todayISO()):"",
       dateFinished:status==="read"?($("#fFin")?.value||todayISO()):""
     };
-    await dbPut(b); books=await dbAll(); closeSheets();
+    await dbPut(b); books=await dbAll(); autoSave(); closeSheets();
     if(status==="read")view="shelf"; else if(status==="want")view="want"; else view="reading";
     render(); toast("“"+title+"” saved");
   };
@@ -857,17 +877,89 @@ function openDetail(id){
     }
     Object.assign(b,{status,rating,currentPage:cur,cover,totalPages:parseInt($("#dPages").value)||0,series:$("#dSeries").value.trim(),notes:$("#dNotes").value,
       dateStarted:$("#dStart").value,dateFinished:$("#dFin").value},extra);
-    await dbPut(b); books=await dbAll(); closeSheets(); render();
+    await dbPut(b); books=await dbAll(); autoSave(); closeSheets(); render();
   };
   $("#dMarkDone").onclick=()=>{status="read";cur=b.totalPages||cur;
     commit({status:"read",currentPage:b.totalPages||cur,dateFinished:$("#dFin").value||todayISO(),dateStarted:$("#dStart").value||b.dateStarted||todayISO()});
     toast("Added to your shelf 📚");};
   $("#dSave").onclick=()=>{commit();toast("Saved");};
-  $("#dDelete").onclick=async()=>{if(confirm("Remove “"+b.title+"” from your library?")){await dbDel(b.id);books=await dbAll();closeSheets();render();toast("Removed");}};
+  $("#dDelete").onclick=async()=>{if(confirm("Remove “"+b.title+"” from your library?")){await dbDel(b.id);books=await dbAll();autoSave();closeSheets();render();toast("Removed");}};
   showSheet("#detailSheet");
 }
 
-/* ---------- ISBN lookup ---------- */
+/* ---------- Auto-save ---------- */
+function timeSince(d){const s=Math.round((Date.now()-new Date(d).getTime())/1000);if(s<60)return"just now";const m=Math.round(s/60);if(m<60)return m+"m ago";const h=Math.round(m/60);if(h<24)return h+"h ago";return Math.round(h/24)+"d ago";}
+
+function updateAutoSaveStatus(){
+  const info=$("#autoSaveInfo"),icon=$("#autoSaveIcon");if(!info)return;
+  if(!autoSaveHandle){
+    info.innerHTML=`<span class="autosave-warn">Not set up.</span> If you clear browser data, your library will be lost. Tap <em>Set up file</em> to create a backup file in Google Drive or any cloud storage.`;
+    if(icon)icon.textContent="⚠";return;
+  }
+  if(!autoSaveOk){
+    info.innerHTML=`<span class="autosave-warn">Permission needed</span> — Chrome needs to re-confirm access to <b>${autoSaveHandle.name}</b>. <button class="link" id="reconnectBtn" style="color:var(--ox);font-family:inherit;font-size:inherit">Reconnect</button>`;
+    if(icon)icon.textContent="🔒";
+    const rb=$("#reconnectBtn");if(rb)rb.onclick=reconnectAutoSave;
+    return;
+  }
+  const ago=lastAutoSave?timeSince(lastAutoSave):"never";
+  info.innerHTML=`<span class="autosave-ok">✓ Auto-saving to <b>${autoSaveHandle.name}</b></span><br>Last saved ${ago}`;
+  if(icon)icon.textContent="☁";
+}
+
+async function doWrite(){
+  if(!autoSaveHandle)return false;
+  try{
+    const payload={version:2,books,goals};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    const w=await autoSaveHandle.createWritable();await w.write(blob);await w.close();
+    lastAutoSave=new Date().toISOString();await metaSet("lastAutoSave",lastAutoSave);
+    autoSaveOk=true;updateAutoSaveStatus();return true;
+  }catch(e){return false;}
+}
+
+async function autoSave(){
+  if(!autoSaveHandle)return;
+  clearTimeout(autoSaveDt);
+  autoSaveDt=setTimeout(async()=>{
+    const perm=await autoSaveHandle.queryPermission({mode:"readwrite"}).catch(()=>"denied");
+    if(perm==="granted"){await doWrite();}
+    else{autoSaveOk=false;updateAutoSaveStatus();}
+  },1500);
+}
+
+async function autoSaveNow(){
+  if(!autoSaveHandle){toast("Set up a backup file in Settings first");return;}
+  let perm=await autoSaveHandle.queryPermission({mode:"readwrite"}).catch(()=>"denied");
+  if(perm!=="granted")perm=await autoSaveHandle.requestPermission({mode:"readwrite"}).catch(()=>"denied");
+  if(perm==="granted"){const ok=await doWrite();toast(ok?"Saved to "+autoSaveHandle.name:"Couldn't write to file");}
+  else{autoSaveOk=false;updateAutoSaveStatus();toast("Permission denied");}
+}
+
+async function reconnectAutoSave(){
+  const perm=await autoSaveHandle.requestPermission({mode:"readwrite"}).catch(()=>"denied");
+  if(perm==="granted"){autoSaveOk=true;await doWrite();}
+  else toast("Permission denied");
+  updateAutoSaveStatus();
+}
+
+async function setupAutoSave(){
+  if(!("showSaveFilePicker" in window)){
+    toast("Your browser doesn't support this feature",3500);return;
+  }
+  try{
+    const h=await window.showSaveFilePicker({
+      suggestedName:"margins-library.json",
+      types:[{description:"Margins backup",accept:{"application/json":[".json"]}}]
+    });
+    autoSaveHandle=h;await metaSet("autoSaveHandle",h);
+    autoSaveOk=false;
+    await autoSaveNow(); // immediate write (requests permission)
+    updateAutoSaveStatus();
+  }catch(e){if(e.name!=="AbortError")toast("Couldn't create that file");}
+}
+
+
 async function toBase64(url){try{const r=await fetch(url);if(!r.ok)throw 0;const blob=await r.blob();if(blob.size<900)throw 0;return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>res(url);fr.readAsDataURL(blob);});}catch(e){return url;}}
 function cleanISBN(s){return (s||"").replace(/[^0-9Xx]/g,"").toUpperCase();}
 function isbn10to13(s){if(s.length!==10)return null;const core="978"+s.slice(0,9);let sum=0;for(let i=0;i<12;i++)sum+=(+core[i])*(i%2?3:1);return core+((10-(sum%10))%10);}
@@ -1051,14 +1143,14 @@ async function importData(file){
     if(!Array.isArray(arr))throw 0;
     for(const b of arr){if(b&&b.id&&b.title)await dbPut(b);}
     if(data&&data.goals&&typeof data.goals==="object"){goals={...goals,...data.goals};await metaSet("goals",goals);}
-    books=await dbAll();render();closeSheets();toast("Imported "+arr.length+" books");
+    books=await dbAll();autoSave();render();closeSheets();toast("Imported "+arr.length+" books");
   }catch(e){toast("Couldn't read that file");}
 }
 
 /* ---------- Wire up ---------- */
 $("#addBtn").onclick=openAdd;
 $("#settingsBtn").onclick=()=>{
-  showSheet("#setSheet");updateBackupStatus();
+  showSheet("#setSheet");updateBackupStatus();updateAutoSaveStatus();
   $("#gbKeyInput").value=gbKey||"";
   const cs=$("#gbCountrySelect");if(cs)cs.value=gbCountry||"NO";
   if("showDirectoryPicker" in window){
@@ -1070,6 +1162,8 @@ $("#closeScan").onclick=stopScan;
 $("#scrim").onclick=closeSheets;
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeSheets);
 document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.view;render();});
+$("#autoSaveSetup").onclick=setupAutoSave;
+$("#autoSaveNow").onclick=autoSaveNow;
 $("#exportBtn").onclick=exportData;
 $("#importFile").onchange=e=>{if(e.target.files[0])importData(e.target.files[0]);};
 $("#gbKeySave").onclick=async()=>{gbKey=$("#gbKeyInput").value.trim();await metaSet("gbKey",gbKey);toast(gbKey?"API key saved":"API key cleared");};
@@ -1104,7 +1198,15 @@ async function setupManifest(){
 }
 setupManifest();
 
-(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); gbKey=await metaGet("gbKey")||""; gbCountry=await metaGet("gbCountry")||"NO"; try{exportDirHandle=await metaGet("exportDirHandle");}catch(e){} render(); })();
+(async function init(){
+  books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup");
+  gbKey=await metaGet("gbKey")||""; gbCountry=await metaGet("gbCountry")||"NO";
+  try{exportDirHandle=await metaGet("exportDirHandle");}catch(e){}
+  try{autoSaveHandle=await metaGet("autoSaveHandle"); lastAutoSave=await metaGet("lastAutoSave");}catch(e){}
+  // Check permission silently so status card is accurate on first open
+  if(autoSaveHandle){const p=await autoSaveHandle.queryPermission({mode:"readwrite"}).catch(()=>"denied");autoSaveOk=(p==="granted");}
+  render();
+})();
 </script>
 </body>
 </html>
