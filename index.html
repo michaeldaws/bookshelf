@@ -321,6 +321,15 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;
   <div class="sheet-body">
     <p class="muted" style="margin-top:0">Your library lives only on this device. Back it up now and then.</p>
     <p id="backupStatus" class="backup-status"></p>
+    <div id="exportFolderSection" style="display:none;margin-bottom:14px">
+      <div class="field" style="margin-bottom:0"><label>Export folder</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span id="exportFolderName" class="muted" style="flex:1;font-size:14px">Not set — saves to Downloads</span>
+          <button class="btn sm" id="chooseFolder">Browse</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:6px">Desktop Chrome/Edge only. Choose a folder (e.g. a Google Drive folder) and exports will save there automatically. The browser re-asks permission each session for security.</p>
+      </div>
+    </div>
     <button class="btn" id="exportBtn">Export library (.json)</button>
     <label class="btn ghost" style="margin-top:10px">Import from backup
       <input type="file" id="importFile" accept="application/json" hidden>
@@ -369,7 +378,7 @@ async function metaGet(key){const db=await openDB();return new Promise((res,rej)
 async function metaSet(key,value){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(META,"readwrite");tx.objectStore(META).put({key,value});tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
 
 /* ---------- State / helpers ---------- */
-let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey=""; let gbCountry="NO";
+let books=[]; let view="reading"; let recentRange=12; let yearFilter=null; let goals={}; let shelfMode="covers"; let editingGoal=false; let lastBackup=null; let gbKey=""; let gbCountry="NO"; let exportDirHandle=null;
 const $=s=>document.querySelector(s); const main=$("#main");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const todayISO=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
@@ -1011,11 +1020,23 @@ async function onScanned(isbn){
 /* ---------- Backup ---------- */
 function exportData(){
   const payload={version:2,books,goals};
-  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
-  a.download="margins-library-"+todayISO()+".json";a.click();
-  lastBackup=new Date().toISOString(); metaSet("lastBackup",lastBackup); updateBackupStatus();
-  toast("Backup downloaded");
+  const json=JSON.stringify(payload,null,2);
+  const blob=new Blob([json],{type:"application/json"});
+  const filename="margins-library-"+todayISO()+".json";
+  const stamp=async()=>{lastBackup=new Date().toISOString();await metaSet("lastBackup",lastBackup);updateBackupStatus();};
+  const fallback=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();stamp();toast("Backup downloaded");};
+  if(exportDirHandle){
+    exportDirHandle.queryPermission({mode:"readwrite"}).then(async perm=>{
+      if(perm!=="granted")perm=await exportDirHandle.requestPermission({mode:"readwrite"});
+      if(perm==="granted"){
+        try{
+          const fh=await exportDirHandle.getFileHandle(filename,{create:true});
+          const w=await fh.createWritable();await w.write(blob);await w.close();
+          stamp();toast("Saved to "+exportDirHandle.name+"/");
+        }catch(e){fallback();}
+      }else{fallback();}
+    }).catch(()=>fallback());
+  }else{fallback();}
 }
 function updateBackupStatus(){
   const el=$("#backupStatus"); if(!el)return;
@@ -1036,7 +1057,15 @@ async function importData(file){
 
 /* ---------- Wire up ---------- */
 $("#addBtn").onclick=openAdd;
-$("#settingsBtn").onclick=()=>{showSheet("#setSheet");updateBackupStatus();$("#gbKeyInput").value=gbKey||"";const cs=$("#gbCountrySelect");if(cs)cs.value=gbCountry||"NO";};
+$("#settingsBtn").onclick=()=>{
+  showSheet("#setSheet");updateBackupStatus();
+  $("#gbKeyInput").value=gbKey||"";
+  const cs=$("#gbCountrySelect");if(cs)cs.value=gbCountry||"NO";
+  if("showDirectoryPicker" in window){
+    const sec=$("#exportFolderSection");if(sec)sec.style.display="";
+    const nm=$("#exportFolderName");if(nm)nm.textContent=exportDirHandle?exportDirHandle.name+" (remembered)":"Not set — saves to Downloads";
+  }
+};
 $("#closeScan").onclick=stopScan;
 $("#scrim").onclick=closeSheets;
 document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeSheets);
@@ -1045,6 +1074,14 @@ $("#exportBtn").onclick=exportData;
 $("#importFile").onchange=e=>{if(e.target.files[0])importData(e.target.files[0]);};
 $("#gbKeySave").onclick=async()=>{gbKey=$("#gbKeyInput").value.trim();await metaSet("gbKey",gbKey);toast(gbKey?"API key saved":"API key cleared");};
 $("#gbCountrySelect").onchange=async()=>{gbCountry=$("#gbCountrySelect").value;await metaSet("gbCountry",gbCountry);toast("Region set to "+gbCountry);};
+$("#chooseFolder").onclick=async()=>{
+  try{
+    const h=await window.showDirectoryPicker({mode:"readwrite",startIn:"documents"});
+    exportDirHandle=h;await metaSet("exportDirHandle",h);
+    $("#exportFolderName").textContent=h.name+" (remembered)";
+    toast("Export folder set to: "+h.name);
+  }catch(e){if(e.name!=="AbortError")toast("Couldn't access that folder");}
+};
 
 /* ---------- PWA manifest with real PNG icons ---------- */
 async function setupManifest(){
@@ -1067,7 +1104,7 @@ async function setupManifest(){
 }
 setupManifest();
 
-(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); gbKey=await metaGet("gbKey")||""; gbCountry=await metaGet("gbCountry")||"NO"; render(); })();
+(async function init(){ books=await dbAll(); goals=await metaGet("goals")||{}; lastBackup=await metaGet("lastBackup"); gbKey=await metaGet("gbKey")||""; gbCountry=await metaGet("gbCountry")||"NO"; try{exportDirHandle=await metaGet("exportDirHandle");}catch(e){} render(); })();
 </script>
 </body>
 </html>
